@@ -1,0 +1,21 @@
+services:
+  ollama:
+    image: ollama/ollama:0.40.13
+    volumes:
+      - ollama:/root/.ollama
+    ports:
+      - "11434:11434"
+
+  convrag:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      CONVRAG_LLM_BASE_URL: http://ollama:11434/v1
+    depends_on:
+      - ollama
+
+volumes:
+  ollama:

@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>convrag</title>
+<style>
+  :root { --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #e2e0d8; --accent: #2f5d50; --warn: #a65c1e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Georgia, "Times New Roman", serif; background: var(--bg); color: var(--ink); }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--line); display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 20px; font-weight: normal; letter-spacing: 0.04em; }
+  header span { color: var(--muted); font-size: 14px; }
+  header label { font-size: 13px; color: var(--muted); margin-left: auto; }
+  header input { font: inherit; font-size: 13px; padding: 4px 6px; border: 1px solid var(--line); background: var(--panel); width: 160px; }
+  main { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; padding: 16px 20px; max-width: 1200px; margin: 0 auto; }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+  #chat { background: var(--panel); border: 1px solid var(--line); min-height: 60vh; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 85%; padding: 10px 12px; line-height: 1.45; font-size: 15px; white-space: pre-wrap; }
+  .user { align-self: flex-end; background: #ebe9e1; }
+  .assistant { align-self: flex-start; background: #f1f6f4; border-left: 3px solid var(--accent); }
+  .meta { font-size: 12px; color: var(--muted); font-family: ui-monospace, Menlo, Consolas, monospace; margin-top: 6px; }
+  .meta .warn { color: var(--warn); }
+  form { display: flex; gap: 8px; margin-top: auto; }
+  form input { flex: 1; font: inherit; font-size: 15px; padding: 10px; border: 1px solid var(--line); }
+  form button { font: inherit; font-size: 15px; padding: 10px 16px; background: var(--accent); color: #fff; border: 0; cursor: pointer; }
+  form button:disabled { opacity: 0.5; cursor: wait; }
+  aside { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 16px; max-height: calc(100vh - 100px); overflow-y: auto; }
+  .card { background: var(--panel); border: 1px solid var(--line); padding: 12px; font-size: 13px; }
+  .card h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: normal; }
+  .source { padding: 8px 0; border-top: 1px solid var(--line); }
+  .source:first-of-type { border-top: 0; }
+  .source b { font-weight: normal; color: var(--accent); margin-right: 6px; }
+  .source .title { color: var(--ink); }
+  .source .text { color: var(--muted); margin-top: 4px; line-height: 1.4; }
+  .source.cited { background: #f1f6f4; margin: 0 -12px; padding-left: 12px; padding-right: 12px; }
+  code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>convrag</h1>
+  <span>conversational search over your documentation</span>
+  <label>collection <input id="collection" value=""></label>
+  <label>api key <input id="apikey" type="password" placeholder="optional"></label>
+</header>
+<main>
+  <section id="chat">
+    <div id="messages" style="display:flex;flex-direction:column;gap:12px"></div>
+    <form id="form">
+      <input id="input" autocomplete="off" placeholder="Ask about the documentation" required>
+      <button id="send" type="submit">Send</button>
+    </form>
+  </section>
+  <aside>
+    <div class="card"><h2>Search queries</h2><div id="queries">Nothing searched yet.</div></div>
+    <div class="card"><h2>Sources</h2><div id="sources">Sources for the latest answer appear here.</div></div>
+    <div class="card"><h2>Timing</h2><div id="timing">-</div></div>
+  </aside>
+</main>
+<script>
+  let sessionId = null;
+  const messages = document.getElementById("messages");
+  const form = document.getElementById("form");
+  const input = document.getElementById("input");
+  const send = document.getElementById("send");
+  const collectionBox = document.getElementById("collection");
+  const apiKeyBox = document.getElementById("apikey");
+
+  function headers() {
+    const h = {"Content-Type": "application/json"};
+    if (apiKeyBox.value) h["Authorization"] = "Bearer " + apiKeyBox.value;
+    return h;
+  }
+
+  async function loadCollections() {
+    try {
+      const res = await fetch("/collections", {headers: headers()});
+      const body = await res.json();
+      if (body.collections && body.collections.length && !collectionBox.value) {
+        collectionBox.value = body.collections[0].collection;
+      }
+    } catch (err) { console.log("collections unavailable", err); }
+  }
+
+  function addMessage(role, text) {
+    const div = document.createElement("div");
+    div.className = "msg " + role;
+    div.textContent = text;
+    messages.appendChild(div);
+    div.scrollIntoView({block: "end"});
+    return div;
+  }
+
+  function renderSources(sources, cited) {
+    const box = document.getElementById("sources");
+    box.innerHTML = "";
+    if (!sources.length) { box.textContent = "No sources retrieved."; return; }
+    sources.forEach((s, i) => {
+      const div = document.createElement("div");
+      div.className = "source" + (cited && cited.includes(i + 1) ? " cited" : "");
+      const score = s.rerank_score === null ? "" : " rerank " + s.rerank_score;
+      div.innerHTML = "<b>[" + (i + 1) + "]</b><span class=\"title\"></span><div class=\"text\"></div><div class=\"meta\">" + s.path + score + "</div>";
+      div.querySelector(".title").textContent = s.title;
+      div.querySelector(".text").textContent = s.text;
+      box.appendChild(div);
+    });
+  }
+
+  function renderQueries(event) {
+    const box = document.getElementById("queries");
+    box.innerHTML = "";
+    const label = document.createElement("div");
+    label.className = "meta";
+    label.textContent = "strategy " + event.strategy + (event.fallback ? " (fell back to window)" : "");
+    box.appendChild(label);
+    event.queries.forEach(q => { const d = document.createElement("div"); d.textContent = q; box.appendChild(d); });
+  }
+
+  function renderTiming(trace) {
+    const parts = trace.spans.map(s => s.name + " " + s.ms + " ms");
+    document.getElementById("timing").textContent = "total " + trace.total_ms + " ms | " + parts.join(" | ");
+  }
+
+  function parseEvents(buffer, onEvent) {
+    const blocks = buffer.split("\n\n");
+    const rest = blocks.pop();
+    for (const block of blocks) {
+      let type = "message", data = "";
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event:")) type = line.slice(6).trim();
+        else if (line.startsWith("data:")) data += line.slice(5).trim();
+      }
+      if (data) onEvent(type, JSON.parse(data));
+    }
+    return rest;
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    send.disabled = true;
+    addMessage("user", text);
+    const bubble = addMessage("assistant", "");
+    let streamed = "";
+    try {
+      const res = await fetch("/chat", {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({message: text, collection: collectionBox.value, session_id: sessionId, stream: true})
+      });
+      if (!res.ok) { bubble.textContent = "Request failed: " + res.status; return; }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const {value, done} = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, {stream: true});
+        buffer = parseEvents(buffer, (type, data) => {
+          if (type === "start") sessionId = data.session_id;
+          else if (type === "queries") renderQueries(data);
+          else if (type === "sources") renderSources(data.sources, []);
+          else if (type === "token") { streamed += data.text; bubble.textContent = streamed; }
+          else if (type === "done") {
+            bubble.textContent = data.answer;
+            const meta = document.createElement("div");
+            meta.className = "meta";
+            const flag = data.abstained ? "abstained (" + data.abstain_reason + ")" : (data.grounded ? "grounded" : "citations not verified");
+            meta.innerHTML = "<span class=\"" + (data.abstained || !data.grounded ? "warn" : "") + "\">" + flag + "</span> | " + data.trace.total_ms + " ms | session " + data.session_id;
+            bubble.appendChild(meta);
+            renderSources(data.sources, data.cited_sources);
+            renderTiming(data.trace);
+          }
+          else if (type === "error") { bubble.textContent = "Error: " + data.message; }
+        });
+      }
+    } catch (err) {
+      bubble.textContent = "Error: " + err;
+    } finally {
+      send.disabled = false;
+      input.focus();
+    }
+  });
+
+  loadCollections();
+</script>
+</body>
+</html>

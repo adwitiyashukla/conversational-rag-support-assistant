@@ -1,0 +1,69 @@
+[paths]
+db_file = "data/convrag.db"
+model_cache = "data/models"
+
+[ingest]
+extensions = [".md", ".txt", ".html", ".htm", ".pdf"]
+max_file_mb = 25
+
+[chunking]
+max_words = 180
+min_words = 40
+overlap_sentences = 1
+title_prefix = true
+
+[embedding]
+backend = "fastembed"
+model = "BAAI/bge-small-en-v1.5"
+query_prefix = "Represent this sentence for searching relevant passages: "
+batch_size = 32
+threads = 8
+
+[reranker]
+enabled = false
+backend = "fastembed"
+model = "Xenova/ms-marco-MiniLM-L-6-v2"
+query_source = "message"
+candidates = 20
+min_score = -8.0
+
+[retrieval]
+mode = "hybrid"
+sparse_k = 50
+dense_k = 50
+rrf_k = 60
+top_k = 5
+max_query_tokens = 64
+
+[rewrite]
+strategy = "fusion"
+window_turns = 3
+history_max_chars = 1500
+
+[llm]
+provider = "openai"
+base_url = "http://localhost:11434/v1"
+model = "qwen2.5:3b"
+api_key_env = "CONVRAG_LLM_API_KEY"
+timeout_seconds = 300
+max_tokens = 200
+temperature = 0.0
+
+[generation]
+history_turns = 6
+min_citation_overlap = 0.35
+abstain_message = "I could not find this in the documentation."
+
+[server]
+host = "127.0.0.1"
+port = 8000
+trace_history = 500
+api_key_env = "CONVRAG_API_KEY"
+
+[evaluation]
+raw_dir = "data/raw/multidoc2dial"
+corpus_dir = "data/corpus/multidoc2dial"
+collection = "multidoc2dial"
+results_dir = "data/results"
+generation_sample = 300
+seed = 7
