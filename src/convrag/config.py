@@ -194,9 +194,10 @@ def _build_section(name: str, cls: type, raw: dict) -> object:
             )
             if not ok:
                 raise ConfigError(f"[{name}].{key} must be {expected.__name__}")
-        elif expected == list[str]:
-            if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
-                raise ConfigError(f"[{name}].{key} must be a list of strings")
+        elif expected == list[str] and (
+            not isinstance(value, list) or not all(isinstance(v, str) for v in value)
+        ):
+            raise ConfigError(f"[{name}].{key} must be a list of strings")
         values[key] = value
     return cls(**values)
 
